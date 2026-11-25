@@ -1,0 +1,53 @@
+name: ISO bauen
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tests ausführen
+        run: python3 -m unittest discover -s tests -v
+
+  iso:
+    needs: tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Werkzeuge installieren
+        run: sudo apt-get update && sudo apt-get install -y xorriso openssl
+
+      - name: Ubuntu-Server-ISO laden und prüfen
+        run: |
+          curl -fsSL https://releases.ubuntu.com/24.04/SHA256SUMS -o SUMS
+          LINE="$(grep 'live-server-amd64.iso' SUMS | head -1)"
+          NAME="$(echo "$LINE" | awk '{print $2}' | tr -d '*')"
+          echo "Lade $NAME"
+          curl -fL -o ubuntu.iso "https://releases.ubuntu.com/24.04/$NAME"
+          echo "$(echo "$LINE" | awk '{print $1}')  ubuntu.iso" | sha256sum -c
+
+      - name: zOS-ISO bauen
+        run: bash build-iso.sh ubuntu.iso
+
+      - name: ISO prüfen
+        run: |
+          xorriso -osirrox on -indev build/zos-server-2.0.iso -extract /server/user-data /tmp/user-data -extract /boot/grub/grub.cfg /tmp/grub.cfg >/dev/null 2>&1
+          grep -q autoinstall /tmp/user-data
+          grep -q 'autoinstall ds=nocloud' /tmp/grub.cfg
+          xorriso -indev build/zos-server-2.0.iso -report_el_torito plain 2>/dev/null | head -20
+          ls -lh build/zos-server-2.0.iso
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zos-server-iso
+          path: build/zos-server-2.0.iso
+          compression-level: 0
+          retention-days: 14
